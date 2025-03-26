@@ -16,11 +16,14 @@ __device__ float gaussian(float x, float sigma) {
 
 // CUDA bilateral filter kernel
 __global__ void bilateral_filter_cuda(unsigned char *src, unsigned char *dst, int width, int height, int channels, int d, float sigma_color, float sigma_space) {
-    //Chaque thread CUDA s’occupe d’un pixel unique
+    //Ici Chaque thread CUDA s’occupe d’un pixel unique
+    //Le code traite des images 2D donc conserver les coordonnées x et y est mieux adapté aux images que si on avait utilisé un vecteur
+    //De plus en gardant x et y, on manipule directement les lignes et les colonnes ce qui correspond à l'organisation de la mémoire de l'image.
+    //L'utilisation d'un index vectoriel serait plus utile si on avait fait des traitements simples pixel par pixel sans voisinage
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x >= width || y >= height) return;
+    if (x >= width || y >= height) return; // Sécurité pour les bords 
 
     int radius = d / 2;
 
@@ -28,12 +31,12 @@ __global__ void bilateral_filter_cuda(unsigned char *src, unsigned char *dst, in
     float weight_sum[3] = {0.0f, 0.0f, 0.0f};
 
     unsigned char *center_pixel = src + (y * width + x) * channels;
-
+    // Parcours de la fenêtre autour du pixel 
     for (int i = -radius; i <= radius; i++) {
         for (int j = -radius; j <= radius; j++) {
             int nx = x + j;
             int ny = y + i;
-
+            // On vérifie que le voisin est bien dans l'image 
             if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
                 unsigned char *neighbor_pixel = src + (ny * width + nx) * channels;
 
@@ -48,7 +51,7 @@ __global__ void bilateral_filter_cuda(unsigned char *src, unsigned char *dst, in
             }
         }
     }
-
+    // Calcul du pixel final après normalisation 
     unsigned char *output_pixel = dst + (y * width + x) * channels;
     for (int c = 0; c < channels; c++) {
         output_pixel[c] = (unsigned char)(filtered_value[c] / (weight_sum[c] + 1e-6f));
@@ -61,28 +64,46 @@ int main(int argc, char *argv[]) {
         printf("Usage: %s <input_image> <output_image>\n", argv[0]);
         return 1;
     }
-
+    // Chargement de l'image
     int width, height, channels;
     unsigned char *image = stbi_load(argv[1], &width, &height, &channels, 0);
     if (!image) {
         printf("Error loading image!\n");
         return 1;
     }
-
+    // Allocation de mémoire CPU pour l'image filtré de la taille de l'image
     unsigned char *filtered_image = (unsigned char *)malloc(width * height * channels);
-
+    // Allocation de mémoire GPU 
     unsigned char *d_src, *d_dst;
     cudaMalloc(&d_src, width * height * channels);
     cudaMalloc(&d_dst, width * height * channels);
-
+    // Copie de l'image sur le GPU
     cudaMemcpy(d_src, image, width * height * channels, cudaMemcpyHostToDevice);
 
     dim3 blockSize(16, 16);
-    dim3 gridSize(32,32);
-    //dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+    dim3 gridSize(32,32); // Taille de grille adaptée à une image 512x512
+    // Grille de 32x32 blocs = 1024 blocs
+    // Bloc de 16x16 = 256 threads
+    // Sachant que 512x512 = 262 144
+    // 1024 blocs x 256 threads = 262 144
+    // Ce calcul permet de vérifier que la grille CUDA couvre entièrement l'image
+    // Appel du kernel CUDA avec les bons paramètres
 
+    
+    // Chronométrage CUDA
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
     bilateral_filter_cuda<<<gridSize, blockSize>>>(d_src, d_dst, width, height, channels, 5, 15.0f, 5.0f);
-    cudaDeviceSynchronize();  // attend la fin du kernel
+    cudaEventRecord(stop);
+
+    cudaDeviceSynchronize(); // Attendre la fin du kernel
+
+
+
+    // Vérification des erreurs cuda 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(err));
@@ -90,10 +111,11 @@ int main(int argc, char *argv[]) {
     
     cudaDeviceSynchronize();
 
+    // Copie du résultat du GPU vers le CPU
     cudaMemcpy(filtered_image, d_dst, width * height * channels, cudaMemcpyDeviceToHost);
-
+    // Copie du résultat du GPU vers le CPU
     stbi_write_png(argv[2], width, height, channels, filtered_image, width * channels);
-
+    // Libération de la mémoire
     cudaFree(d_src);
     cudaFree(d_dst);
     stbi_image_free(image);

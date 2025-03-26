@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
 
 // Gaussian function
 double gaussian(double x, double sigma) {
@@ -105,9 +106,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Apply the bilateral filter
+    clock_t start_time = clock();
     bilateral_filter(image, filtered_image, width, height, channels, 5, 75.0, 75.0);
-
+    clock_t end_time = clock();
+    double cpu_time_used = ((double) (end_time - start_time)) / CLOCKS_PER_SEC;
+    printf("Execution time on CPU: %f seconds\n", cpu_time_used);
+    
     // Save the output image
     if (!stbi_write_png(argv[2], width, height, channels, filtered_image, width * channels)) {
         printf("Error saving the image!\n");
