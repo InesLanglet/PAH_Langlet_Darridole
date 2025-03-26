@@ -109,7 +109,11 @@ int main(int argc, char *argv[]) {
         printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(err));
     }
     
-    cudaDeviceSynchronize();
+    float milliseconds = 0;
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    printf("Execution time on GPU: %f ms\n", milliseconds);
 
     // Copie du résultat du GPU vers le CPU
     cudaMemcpy(filtered_image, d_dst, width * height * channels, cudaMemcpyDeviceToHost);
