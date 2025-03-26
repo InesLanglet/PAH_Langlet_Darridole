@@ -59,10 +59,9 @@ __global__ void bilateral_filter_cuda(unsigned char *src, unsigned char *dst, in
 }
 
 
-// Fonction principale
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        printf("Usage: %s <input_image> <output_image>\n", argv[0]);
+    if (argc < 2) {
+        printf("Usage: %s <input_image>\n", argv[0]);
         return 1;
     }
 
@@ -82,42 +81,51 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(d_src, image, width * height * channels, cudaMemcpyHostToDevice);
 
     dim3 blockSize(16, 16);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
-                  (height + blockSize.y - 1) / blockSize.y);
+    dim3 gridSize(32,32);
 
-    // Chronométrage CUDA
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    int d_values[] = {3, 5, 9};
+    float sigma_s_values[] = {10.0f, 30.0f, 75.0f};
+    float sigma_r_values[] = {10.0f, 30.0f, 75.0f};
 
-    cudaEventRecord(start);
-    bilateral_filter_cuda<<<gridSize, blockSize>>>(d_src, d_dst, width, height, channels, 5, 15.0f, 5.0f);
-    cudaEventRecord(stop);
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            for (int k = 0; k < 3; k++) {
+                cudaEvent_t start, stop;
+                cudaEventCreate(&start);
+                cudaEventCreate(&stop);
 
-    cudaDeviceSynchronize();
+                cudaEventRecord(start);
+                bilateral_filter_cuda<<<gridSize, blockSize>>>(d_src, d_dst, width, height, channels, d_values[k], sigma_r_values[j], sigma_s_values[i]);
+                cudaEventRecord(stop);
 
-    // Vérification des erreurs CUDA
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(err));
+                cudaDeviceSynchronize();
+
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(err));
+                }
+
+                float milliseconds = 0;
+                cudaEventSynchronize(stop);
+                cudaEventElapsedTime(&milliseconds, start, stop);
+
+                cudaMemcpy(filtered_image, d_dst, width * height * channels, cudaMemcpyDeviceToHost);
+
+                char output_name[150];
+                sprintf(output_name, "output_gpu_d%d_ss%.1f_sr%.1f.png", d_values[k], sigma_s_values[i], sigma_r_values[j]);
+                stbi_write_png(output_name, width, height, channels, filtered_image, width * channels);
+
+                printf("d = %d, sigma_s = %.1f, sigma_r = %.1f, GPU time = %f ms\n", d_values[k], sigma_s_values[i], sigma_r_values[j], milliseconds);
+            }
+        }
     }
-
-    float milliseconds = 0;
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&milliseconds, start, stop);
-
-    printf("Execution time on GPU: %f ms\n", milliseconds);
-
-    cudaMemcpy(filtered_image, d_dst, width * height * channels, cudaMemcpyDeviceToHost);
-
-    stbi_write_png(argv[2], width, height, channels, filtered_image, width * channels);
 
     cudaFree(d_src);
     cudaFree(d_dst);
     stbi_image_free(image);
     free(filtered_image);
 
-    printf("CUDA bilateral filter complete. Output saved as %s\n", argv[2]);
+    printf("All GPU bilateral filters complete.\n");
     return 0;
 }
 
