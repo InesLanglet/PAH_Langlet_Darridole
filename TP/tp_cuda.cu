@@ -58,7 +58,70 @@ __global__ void bilateral_filter_cuda(unsigned char *src, unsigned char *dst, in
     }
 }
 
-// Main function
+
+// Fonction principale
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        printf("Usage: %s <input_image> <output_image>\n", argv[0]);
+        return 1;
+    }
+
+    int width, height, channels;
+    unsigned char *image = stbi_load(argv[1], &width, &height, &channels, 0);
+    if (!image) {
+        printf("Error loading image!\n");
+        return 1;
+    }
+
+    unsigned char *filtered_image = (unsigned char *)malloc(width * height * channels);
+
+    unsigned char *d_src, *d_dst;
+    cudaMalloc(&d_src, width * height * channels);
+    cudaMalloc(&d_dst, width * height * channels);
+
+    cudaMemcpy(d_src, image, width * height * channels, cudaMemcpyHostToDevice);
+
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
+                  (height + blockSize.y - 1) / blockSize.y);
+
+    // Chronométrage CUDA
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+    bilateral_filter_cuda<<<gridSize, blockSize>>>(d_src, d_dst, width, height, channels, 5, 15.0f, 5.0f);
+    cudaEventRecord(stop);
+
+    cudaDeviceSynchronize();
+
+    // Vérification des erreurs CUDA
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("CUDA error after kernel launch: %s\n", cudaGetErrorString(err));
+    }
+
+    float milliseconds = 0;
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    printf("Execution time on GPU: %f ms\n", milliseconds);
+
+    cudaMemcpy(filtered_image, d_dst, width * height * channels, cudaMemcpyDeviceToHost);
+
+    stbi_write_png(argv[2], width, height, channels, filtered_image, width * channels);
+
+    cudaFree(d_src);
+    cudaFree(d_dst);
+    stbi_image_free(image);
+    free(filtered_image);
+
+    printf("CUDA bilateral filter complete. Output saved as %s\n", argv[2]);
+    return 0;
+}
+
+/* // Main function
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         printf("Usage: %s <input_image> <output_image>\n", argv[0]);
@@ -127,4 +190,4 @@ int main(int argc, char *argv[]) {
 
     printf("CUDA bilateral filter complete. Output saved as %s\n", argv[2]);
     return 0;
-}
+} */
